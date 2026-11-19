@@ -366,5 +366,15 @@ class SettingsView(QWidget):
     def _emit_dsp(self) -> None:
         self.dsp_filters_changed.emit(self.chk_notch.isChecked(), self.chk_bandpass.isChecked())
 
+    def select_usb_port(self, port: str) -> None:
+        self.refresh_ports()
+        usb_idx = self.mode_combo.findData("usb")
+        if usb_idx >= 0:
+            self.mode_combo.setCurrentIndex(usb_idx)
+        port_idx = self.port_combo.findData(port)
+        if port_idx >= 0:
+            self.port_combo.setCurrentIndex(port_idx)
+        self._sync_port_enabled()
+
     def set_status_text(self, text: str) -> None:
         self.port_status.setText(text)

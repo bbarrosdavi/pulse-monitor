@@ -307,9 +307,12 @@ class StatusPill(QFrame):
         layout.addWidget(self._dot)
         layout.addWidget(self._label)
 
-    def set_connected(self, connected: bool, tooltip: str = "") -> None:
+    def set_connected(self, connected: bool, tooltip: str = "", label: str | None = None) -> None:
         dot_color = "#58B970" if connected else "#E09A48"
         self._dot.setStyleSheet(f"background-color: {dot_color}; border-radius: 3px; border: none;")
-        self._label.setText("Tempo real" if connected else "Aguardando")
+        if label is not None:
+            self._label.setText(label)
+        else:
+            self._label.setText("Tempo real" if connected else "Aguardando")
         if tooltip:
             self.setToolTip(tooltip)

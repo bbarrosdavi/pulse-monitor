@@ -23,11 +23,25 @@ def list_serial_ports() -> list[tuple[str, str]]:
     return ports
 
 
+def find_arduino_port() -> str | None:
+    """Detecta automaticamente uma porta USB de Arduino Pro Micro / Leonardo conectada."""
+    candidates = list(list_ports.comports())
+    for p in candidates:
+        desc = f"{p.description or ''} {p.manufacturer or ''}".lower()
+        if p.vid == 0x2341 or "arduino" in desc or "leonardo" in desc or "sparkfun" in desc:
+            return p.device
+    for p in candidates:
+        if p.device.startswith("/dev/ttyACM"):
+            return p.device
+    return None
+
+
 class SerialAcquisitionManager(QObject):
     """Gerencia conexão serial com Arduino físico ou simulador Arduino+MAX30102."""
 
     status_changed = Signal(bool, str, int)  # connected, status_text, mode
     error_occurred = Signal(str)
+    diagnostic_received = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -142,6 +156,10 @@ class SerialAcquisitionManager(QObject):
     def _open_serial(self, port: str, default_mode: int, label: str, baudrate: int = BAUD_RATE) -> None:
         try:
             ser = serial.Serial(port=port, baudrate=baudrate, timeout=0.2)
+            try:
+                ser.dtr = True
+            except (serial.SerialException, OSError):
+                pass
         except (serial.SerialException, OSError) as exc:
             self.error_occurred.emit(f"Falha ao abrir {port}: {exc}")
             self.status_changed.emit(False, f"Erro em {port}", default_mode)
@@ -159,6 +177,9 @@ class SerialAcquisitionManager(QObject):
         )
         self._reader_thread.start()
         self.status_changed.emit(True, label, default_mode)
+        if not self._use_virtual_arduino:
+            self.send_command("STATUS")
+            self.send_command("PING")
 
     def _read_loop(self, ser: serial.Serial, default_mode: int) -> None:
         last_mode = default_mode
@@ -177,6 +198,9 @@ class SerialAcquisitionManager(QObject):
             line = raw_line.decode("ascii", errors="ignore")
             sample = decode_sample(line)
             if sample is None:
+                stripped = line.strip()
+                if stripped.startswith(("STATUS,", "DIAG,", "ERR_REAL,", "PONG,")):
+                    self.diagnostic_received.emit(stripped)
                 continue
 
             if sample.mode != last_mode:

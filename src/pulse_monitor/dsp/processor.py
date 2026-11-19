@@ -22,6 +22,7 @@ class DspConfig:
     enable_bandpass: bool = True
     lowcut_hz: float = 0.5
     highcut_hz: float = 4.5
+    finger_ir_threshold: float = 20_000.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,7 @@ class DspMetrics:
     r_ratio: float
     perfusion_index_pct: float
     sample_count: int
+    finger_detected: bool = True
 
 
 class PpgSignalProcessor:
@@ -50,6 +52,7 @@ class PpgSignalProcessor:
 
         self._bpm_ema: float | None = None
         self._spo2_ema: float | None = None
+        self._finger_present: bool = False
 
         fs = self.config.sample_rate_hz
         self._b_notch, self._a_notch = signal.iirnotch(60.0, Q=30.0, fs=fs)
@@ -67,12 +70,23 @@ class PpgSignalProcessor:
         self._total_samples = 0
         self._bpm_ema = None
         self._spo2_ema = None
+        self._finger_present = False
 
     def push_samples(self, samples: list[PpgSample]) -> None:
         """Adiciona novas amostras recebidas da porta serial."""
+        threshold = self.config.finger_ir_threshold
         for s in samples:
-            self._ir_buf.append(float(s.ir_raw))
-            self._red_buf.append(float(s.red_raw))
+            ir_val = float(s.ir_raw)
+            red_val = float(s.red_raw)
+            if not self._finger_present and ir_val >= threshold:
+                # Limpa amostras antigas sem dedo para evitar degrau DC no filtro
+                self._ir_buf.clear()
+                self._red_buf.clear()
+                self._bpm_ema = None
+                self._spo2_ema = None
+                self._finger_present = True
+            self._ir_buf.append(ir_val)
+            self._red_buf.append(red_val)
             self._total_samples += 1
 
     def _apply_filters(self, ac_signal: np.ndarray) -> np.ndarray:
@@ -93,6 +107,10 @@ class PpgSignalProcessor:
         time_axis = np.linspace(0.0, self.config.display_seconds, display_len, endpoint=True)
 
         if len(self._ir_buf) < int(fs * 1.2):
+            recent_ir = float(np.mean(self._ir_buf)) if self._ir_buf else 0.0
+            finger_ok = recent_ir >= self.config.finger_ir_threshold
+            if not finger_ok:
+                self._finger_present = False
             zeros = np.zeros(display_len, dtype=np.float64)
             return DspMetrics(
                 time_axis=time_axis,
@@ -103,10 +121,29 @@ class PpgSignalProcessor:
                 r_ratio=0.0,
                 perfusion_index_pct=0.0,
                 sample_count=self._total_samples,
+                finger_detected=finger_ok,
             )
 
         ir_raw = np.asarray(self._ir_buf, dtype=np.float64)
         red_raw = np.asarray(self._red_buf, dtype=np.float64)
+
+        recent_tail_ir = float(np.mean(ir_raw[-int(0.25 * fs):]))
+        if recent_tail_ir < self.config.finger_ir_threshold:
+            self._finger_present = False
+            self._bpm_ema = None
+            self._spo2_ema = None
+            zeros = np.zeros(display_len, dtype=np.float64)
+            return DspMetrics(
+                time_axis=time_axis,
+                ppg_filtered=zeros,
+                ppg_raw_ac=zeros,
+                bpm=0.0,
+                spo2=0.0,
+                r_ratio=0.0,
+                perfusion_index_pct=0.0,
+                sample_count=self._total_samples,
+                finger_detected=False,
+            )
 
         dc_ir = float(np.mean(ir_raw))
         dc_red = float(np.mean(red_raw))

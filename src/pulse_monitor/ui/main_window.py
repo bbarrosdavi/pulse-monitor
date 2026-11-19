@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pulse_monitor.acquisition.serial_worker import SerialAcquisitionManager
+from pulse_monitor.acquisition.serial_worker import SerialAcquisitionManager, find_arduino_port
 from pulse_monitor.dsp.processor import PpgSignalProcessor
 from pulse_monitor.protocol import SourceMode
 from pulse_monitor.simulator.ppg_model import Max30102Simulator
@@ -156,9 +156,14 @@ class MainWindow(QMainWindow):
         self._update_timer.timeout.connect(self._on_tick)
 
         if start_acquisition:
-            prewarm = self.acquisition.start_virtual_arduino(prewarm_seconds=5.0)
-            self.processor.push_samples(prewarm)
-            self._apply_metrics_to_ui(self.processor.process())
+            arduino_port = find_arduino_port()
+            if arduino_port:
+                self.settings_view.select_usb_port(arduino_port)
+                self.acquisition.start_physical_serial(arduino_port)
+            else:
+                prewarm = self.acquisition.start_virtual_arduino(prewarm_seconds=5.0)
+                self.processor.push_samples(prewarm)
+                self._apply_metrics_to_ui(self.processor.process())
             self._update_timer.start()
         else:
             self._prewarm_processor()
@@ -358,12 +363,24 @@ class MainWindow(QMainWindow):
             )
 
     def _apply_metrics_to_ui(self, metrics) -> None:
-        if metrics.bpm > 0:
-            bpm_ratio = (metrics.bpm - 20.0) / 100.0  # ~0.42 em 62 bpm (fiel à imagem)
-            self.bpm_card.set_value(f"{round(metrics.bpm)}", bpm_ratio)
-        if metrics.spo2 > 0:
-            spo2_ratio = (metrics.spo2 - 75.0) / 35.0  # ~0.65 em 98 % (fiel à imagem)
-            self.spo2_card.set_value(f"{round(metrics.spo2)}", spo2_ratio)
+        if not metrics.finger_detected:
+            self.bpm_card.set_value("--", 0.05)
+            self.spo2_card.set_value("--", 0.05)
+            if self._connected:
+                port = self.acquisition.current_port or ""
+                tooltip = f"{self._current_source_label} ({port}) — Posicione o dedo no sensor"
+                self.ppg_card.status_pill.set_connected(True, tooltip=tooltip, label="Posicione o dedo")
+        else:
+            if self._connected:
+                port = self.acquisition.current_port or ""
+                tooltip = f"{self._current_source_label} ({port})" if port else self._current_source_label
+                self.ppg_card.status_pill.set_connected(True, tooltip=tooltip, label="Tempo real")
+            if metrics.bpm > 0:
+                bpm_ratio = (metrics.bpm - 20.0) / 100.0  # ~0.42 em 62 bpm (fiel à imagem)
+                self.bpm_card.set_value(f"{round(metrics.bpm)}", bpm_ratio)
+            if metrics.spo2 > 0:
+                spo2_ratio = (metrics.spo2 - 75.0) / 35.0  # ~0.65 em 98 % (fiel à imagem)
+                self.spo2_card.set_value(f"{round(metrics.spo2)}", spo2_ratio)
 
         self.ppg_card.update_waveform(metrics.time_axis, metrics.ppg_filtered)
         self.analysis_view.update_metrics(metrics)
