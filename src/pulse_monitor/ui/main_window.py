@@ -1,6 +1,8 @@
-"""Janela principal do Pulse Monitor reproduzindo fielmente o layout da IHM."""
+"""Janela principal do Pulse Monitor em estilo monitor clínico multiparamétrico."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QMouseEvent
@@ -25,91 +27,92 @@ from pulse_monitor.ui.ppg_chart import PpgChartCard
 from pulse_monitor.ui.views import AnalysisView, RecordsView, SettingsView
 
 
-class _WindowDot(QPushButton):
-    """Botão circular estilo macOS da barra de título."""
-
-    def __init__(self, color: str, tooltip: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setFixedSize(12, 12)
+class _WindowControl(QPushButton):
+    def __init__(self, symbol: str, tooltip: str, hover_bg: str, parent: QWidget | None = None) -> None:
+        super().__init__(symbol, parent)
+        self.setFixedSize(28, 24)
         self.setToolTip(tooltip)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(
             f"""
             QPushButton {{
-                background-color: {color};
+                background-color: transparent;
+                color: #8BA3BA;
                 border: none;
                 border-radius: 6px;
+                font-size: 13px;
+                font-weight: 700;
             }}
             QPushButton:hover {{
-                opacity: 0.85;
+                background-color: {hover_bg};
+                color: #FFFFFF;
             }}
             """
         )
 
 
 class _TitleBar(QFrame):
-    """Barra de título customizada com controles de janela e arraste."""
+    """Barra superior clínica com identificação do instrumento, relógio e controles."""
 
     def __init__(self, window: QMainWindow) -> None:
         super().__init__(window)
         self._window = window
         self._drag_pos: QPoint | None = None
-        self.setFixedHeight(42)
+        self.setFixedHeight(44)
         self.setObjectName("TitleBar")
         self.setStyleSheet(
             """
             #TitleBar {
-                background-color: #FDF9FA;
-                border-top-left-radius: 14px;
-                border-top-right-radius: 14px;
-                border-bottom: 1px solid #F1E6E9;
+                background-color: #101923;
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+                border-bottom: 1px solid #1E2E3E;
             }
             """
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 0, 12, 0)
+        layout.setSpacing(10)
 
-        dots_row = QHBoxLayout()
-        dots_row.setSpacing(8)
-        self.btn_close = _WindowDot("#FF5F56", "Fechar", self)
-        self.btn_min = _WindowDot("#FFBD2E", "Minimizar", self)
-        self.btn_max = _WindowDot("#27C93F", "Maximizar", self)
-        self.btn_close.clicked.connect(window.close)
-        self.btn_min.clicked.connect(window.showMinimized)
-        self.btn_max.clicked.connect(self._toggle_maximize)
-        dots_row.addWidget(self.btn_close)
-        dots_row.addWidget(self.btn_min)
-        dots_row.addWidget(self.btn_max)
-
-        left_box = QWidget(self)
-        left_box.setStyleSheet("background: transparent;")
-        left_box_layout = QHBoxLayout(left_box)
-        left_box_layout.setContentsMargins(0, 0, 0, 0)
-        left_box_layout.addLayout(dots_row)
-
-        center_row = QHBoxLayout()
-        center_row.setSpacing(8)
         icon_lbl = QLabel(self)
-        icon_lbl.setPixmap(make_title_icon(19))
+        icon_lbl.setPixmap(make_title_icon(20))
         icon_lbl.setStyleSheet("background: transparent;")
+
         title_lbl = QLabel("Pulse Monitor", self)
         title_lbl.setStyleSheet(
-            "color: #5E484F; font-size: 13.5px; font-weight: 500; background: transparent;"
+            "color: #E8F0F7; font-size: 14px; font-weight: 700; letter-spacing: 0.4px; background: transparent;"
         )
-        center_row.addWidget(icon_lbl)
-        center_row.addWidget(title_lbl)
+        sub_lbl = QLabel("MONITOR MULTIPARAMÉTRICO  •  PPG / SpO₂", self)
+        sub_lbl.setStyleSheet(
+            "color: #5E7A94; font-size: 11px; font-weight: 600; letter-spacing: 0.7px; background: transparent;"
+        )
 
-        right_spacer = QWidget(self)
-        right_spacer.setFixedWidth(56)
-        right_spacer.setStyleSheet("background: transparent;")
+        self.clock_lbl = QLabel(datetime.now().strftime("%H:%M:%S"), self)
+        self.clock_lbl.setStyleSheet(
+            "color: #8FA7BF; font-size: 12px; font-weight: 600; background: #0B1219; "
+            "border: 1px solid #1C2B3A; border-radius: 6px; padding: 3px 9px;"
+        )
 
-        layout.addWidget(left_box)
+        self.btn_min = _WindowControl("–", "Minimizar", "#1E3042", self)
+        self.btn_max = _WindowControl("□", "Maximizar", "#1E3042", self)
+        self.btn_close = _WindowControl("×", "Fechar", "#D32F2F", self)
+        self.btn_min.clicked.connect(window.showMinimized)
+        self.btn_max.clicked.connect(self._toggle_maximize)
+        self.btn_close.clicked.connect(window.close)
+
+        layout.addWidget(icon_lbl)
+        layout.addWidget(title_lbl)
+        layout.addWidget(sub_lbl)
         layout.addStretch(1)
-        layout.addLayout(center_row)
-        layout.addStretch(1)
-        layout.addWidget(right_spacer)
+        layout.addWidget(self.clock_lbl)
+        layout.addSpacing(8)
+        layout.addWidget(self.btn_min)
+        layout.addWidget(self.btn_max)
+        layout.addWidget(self.btn_close)
+
+    def update_clock(self) -> None:
+        self.clock_lbl.setText(datetime.now().strftime("%H:%M:%S"))
 
     def _toggle_maximize(self) -> None:
         if self._window.isMaximized():
@@ -132,13 +135,13 @@ class _TitleBar(QFrame):
 
 
 class MainWindow(QMainWindow):
-    """IHM principal do Instrumento Virtual Pulse Monitor."""
+    """IHM clínica principal do Instrumento Virtual Pulse Monitor."""
 
     def __init__(self, *, start_acquisition: bool = True) -> None:
         super().__init__()
-        self.setWindowTitle("Pulse Monitor")
-        self.resize(1060, 590)
-        self.setMinimumSize(900, 520)
+        self.setWindowTitle("Pulse Monitor — Monitor Cardíaco")
+        self.resize(1120, 640)
+        self.setMinimumSize(920, 540)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -152,7 +155,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
 
         self._update_timer = QTimer(self)
-        self._update_timer.setInterval(33)  # ~30 FPS suaves para rolagem contínua
+        self._update_timer.setInterval(33)  # ~30 FPS suaves
         self._update_timer.timeout.connect(self._on_tick)
 
         if start_acquisition:
@@ -178,9 +181,9 @@ class MainWindow(QMainWindow):
         self.window_frame.setStyleSheet(
             """
             #WindowFrame {
-                background-color: #FCF7F8;
-                border: 1px solid #EDE2E5;
-                border-radius: 14px;
+                background-color: #0B1118;
+                border: 1px solid #1E2E3F;
+                border-radius: 12px;
             }
             """
         )
@@ -195,16 +198,16 @@ class MainWindow(QMainWindow):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # Barra lateral esquerda
+        # Barra lateral esquerda clínica
         sidebar = QFrame(self.window_frame)
         sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(56)
+        sidebar.setFixedWidth(58)
         sidebar.setStyleSheet(
             """
             #Sidebar {
-                background-color: #FDF9FA;
-                border-bottom-left-radius: 14px;
-                border-right: 1px solid #F1E6E9;
+                background-color: #0F1720;
+                border-bottom-left-radius: 12px;
+                border-right: 1px solid #1D2C3C;
             }
             """
         )
@@ -213,10 +216,10 @@ class MainWindow(QMainWindow):
         sb_layout.setSpacing(12)
 
         self.nav_buttons = [
-            SidebarButton("home", "Monitoramento Principal", sidebar),
+            SidebarButton("home", "Monitor Multiparamétrico", sidebar),
             SidebarButton("wave", "Análise DSP e Filtros", sidebar),
-            SidebarButton("records", "Registros da Sessão", sidebar),
-            SidebarButton("settings", "Configurações Hardware / Simulador", sidebar),
+            SidebarButton("records", "Prontuário da Sessão", sidebar),
+            SidebarButton("settings", "Hardware / Simulador", sidebar),
         ]
         for idx, btn in enumerate(self.nav_buttons):
             btn.clicked.connect(lambda _checked=False, i=idx: self._switch_page(i))
@@ -225,11 +228,11 @@ class MainWindow(QMainWindow):
         self.nav_buttons[0].set_active(True)
         body.addWidget(sidebar)
 
-        # Área principal com StackedWidget
+        # Área principal
         content_wrap = QWidget(self.window_frame)
         content_wrap.setStyleSheet("background: transparent;")
         content_layout = QVBoxLayout(content_wrap)
-        content_layout.setContentsMargins(20, 18, 20, 18)
+        content_layout.setContentsMargins(18, 16, 18, 16)
 
         self.stack = QStackedWidget(content_wrap)
         self.home_page = self._build_home_page()
@@ -254,28 +257,29 @@ class MainWindow(QMainWindow):
         page.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
-        # Linha superior: 3 cards exatamente como no protótipo
         top_row = QHBoxLayout()
-        top_row.setSpacing(16)
+        top_row.setSpacing(14)
 
         self.bpm_card = MetricCard(
             title="Frequência Cardíaca",
             unit="bpm",
             badge_kind="heart",
-            bar_color="#E6738E",
+            bar_color="#00E676",
             initial_value="62",
             initial_ratio=0.42,
+            limits_text="60–100",
             parent=page,
         )
         self.spo2_card = MetricCard(
             title="Saturação de Oxigênio",
             unit="%",
             badge_kind="o2",
-            bar_color="#A98FD3",
+            bar_color="#29B6F6",
             initial_value="98",
             initial_ratio=0.65,
+            limits_text="95–100%",
             parent=page,
         )
         self.quote_card = HeartQuoteCard(page)
@@ -283,11 +287,10 @@ class MainWindow(QMainWindow):
         top_row.addWidget(self.bpm_card, 1)
         top_row.addWidget(self.spo2_card, 1)
         top_row.addWidget(self.quote_card, 1)
-        layout.addLayout(top_row, 37)
+        layout.addLayout(top_row, 35)
 
-        # Linha inferior: gráfico contínuo Sinal PPG
         self.ppg_card = PpgChartCard(page)
-        layout.addWidget(self.ppg_card, 63)
+        layout.addWidget(self.ppg_card, 65)
 
         return page
 
@@ -346,6 +349,10 @@ class MainWindow(QMainWindow):
         self.processor.config.enable_bandpass = bandpass
 
     def _on_tick(self) -> None:
+        self._record_tick += 1
+        if self._record_tick % 15 == 0:
+            self.title_bar.update_clock()
+
         samples = self.acquisition.drain_samples()
         if not samples:
             return
@@ -353,8 +360,7 @@ class MainWindow(QMainWindow):
         metrics = self.processor.process()
         self._apply_metrics_to_ui(metrics)
 
-        self._record_tick += 1
-        if self._record_tick % 30 == 0:  # ~1 registro por segundo na tabela
+        if self._record_tick % 30 == 0 and metrics.finger_detected:
             self.records_view.add_record(
                 metrics.bpm,
                 metrics.spo2,
@@ -376,13 +382,20 @@ class MainWindow(QMainWindow):
                 tooltip = f"{self._current_source_label} ({port})" if port else self._current_source_label
                 self.ppg_card.status_pill.set_connected(True, tooltip=tooltip, label="Tempo real")
             if metrics.bpm > 0:
-                bpm_ratio = (metrics.bpm - 20.0) / 100.0  # ~0.42 em 62 bpm (fiel à imagem)
+                bpm_ratio = (metrics.bpm - 20.0) / 100.0
                 self.bpm_card.set_value(f"{round(metrics.bpm)}", bpm_ratio)
             if metrics.spo2 > 0:
-                spo2_ratio = (metrics.spo2 - 75.0) / 35.0  # ~0.65 em 98 % (fiel à imagem)
+                spo2_ratio = (metrics.spo2 - 75.0) / 35.0
                 self.spo2_card.set_value(f"{round(metrics.spo2)}", spo2_ratio)
 
-        self.ppg_card.update_waveform(metrics.time_axis, metrics.ppg_filtered)
+        self.quote_card.update_telemetry(
+            bpm=metrics.bpm,
+            pi_pct=metrics.perfusion_index_pct,
+            r_ratio=metrics.r_ratio,
+            finger_detected=metrics.finger_detected,
+        )
+        wave = metrics.ecg_display if metrics.ecg_display is not None else metrics.ppg_filtered
+        self.ppg_card.update_waveform(metrics.time_axis, wave)
         self.analysis_view.update_metrics(metrics)
 
     def closeEvent(self, event) -> None:  # noqa: N802

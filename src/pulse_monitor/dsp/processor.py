@@ -38,6 +38,7 @@ class DspMetrics:
     perfusion_index_pct: float
     sample_count: int
     finger_detected: bool = True
+    ecg_display: np.ndarray | None = None
 
 
 class PpgSignalProcessor:
@@ -122,6 +123,7 @@ class PpgSignalProcessor:
                 perfusion_index_pct=0.0,
                 sample_count=self._total_samples,
                 finger_detected=finger_ok,
+                ecg_display=zeros,
             )
 
         ir_raw = np.asarray(self._ir_buf, dtype=np.float64)
@@ -143,6 +145,7 @@ class PpgSignalProcessor:
                 perfusion_index_pct=0.0,
                 sample_count=self._total_samples,
                 finger_detected=False,
+                ecg_display=zeros,
             )
 
         dc_ir = float(np.mean(ir_raw))
@@ -201,6 +204,7 @@ class PpgSignalProcessor:
             self._spo2_ema = spo2_inst if self._spo2_ema is None else (0.20 * spo2_inst + 0.80 * self._spo2_ema)
 
         pi_pct = (float(p_high - p_low) / dc_ir * 100.0) if dc_ir > 1.0 else 0.0
+        ecg_disp = self._synthesize_ecg_from_peaks(ir_filt, display_len, fs, ppg_disp)
 
         return DspMetrics(
             time_axis=time_axis,
@@ -211,4 +215,54 @@ class PpgSignalProcessor:
             r_ratio=r_ratio,
             perfusion_index_pct=pi_pct,
             sample_count=self._total_samples,
+            finger_detected=True,
+            ecg_display=ecg_disp,
         )
+
+    @staticmethod
+    def _synthesize_ecg_from_peaks(
+        ir_filt: np.ndarray,
+        display_len: int,
+        fs: float,
+        ppg_disp: np.ndarray,
+    ) -> np.ndarray:
+        """Gera traçado estilo ECG (complexo P-QRS-T) sincronizado aos picos reais do PPG."""
+        margin = int(0.45 * fs)
+        seg_len = min(len(ir_filt), display_len + margin)
+        seg = ir_filt[-seg_len:]
+        seg_std = float(np.std(seg))
+        if seg_std < 1e-3:
+            return np.full(display_len, -0.20, dtype=np.float64)
+
+        peaks, _ = signal.find_peaks(
+            seg,
+            distance=int(0.28 * fs),
+            prominence=max(0.30 * seg_std, 1e-3),
+        )
+
+        # Deslocamento entre o segmento analisado e a janela de exibição [0..display_len)
+        tail_offset = seg_len - display_len
+        t_grid = np.arange(display_len, dtype=np.float64) / fs
+        ecg = np.full(display_len, -0.20, dtype=np.float64)
+
+        # Modulação sutil da amplitude real de cada batimento
+        median_peak = float(np.median(seg[peaks])) if len(peaks) > 0 else seg_std
+        median_peak = max(abs(median_peak), 1e-3)
+
+        for pk in peaks:
+            t_r = (pk - tail_offset) / fs
+            if t_r < -0.35 or t_r > (display_len / fs) + 0.35:
+                continue
+            amp = float(np.clip(seg[pk] / median_peak, 0.80, 1.18))
+            dt = t_grid - t_r
+            # Complexo P-Q-R-S-T clássico
+            p_wave = 0.13 * np.exp(-0.5 * ((dt + 0.165) / 0.026) ** 2)
+            q_wave = -0.14 * np.exp(-0.5 * ((dt + 0.040) / 0.010) ** 2)
+            r_wave = 0.90 * np.exp(-0.5 * (dt / 0.012) ** 2)
+            s_wave = -0.26 * np.exp(-0.5 * ((dt - 0.036) / 0.011) ** 2)
+            t_wave = 0.23 * np.exp(-0.5 * ((dt - 0.215) / 0.044) ** 2)
+            ecg += amp * (p_wave + q_wave + r_wave + s_wave + t_wave)
+
+        # Pequena variação orgânica vinda do sinal PPG filtrado real
+        ecg += 0.03 * ppg_disp
+        return np.clip(ecg, -0.95, 0.95)

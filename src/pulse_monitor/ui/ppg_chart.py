@@ -1,4 +1,4 @@
-"""Gráfico de onda PPG em tempo real usando PyQtGraph com preenchimento em gradiente."""
+"""Gráfico clínico em formato ECG (P-QRS-T) em tempo real com PyQtGraph."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class _PpgBadge(QWidget):
 
 
 class PpgChartCard(QFrame):
-    """Card inferior 'Sinal PPG' idêntico ao protótipo com plotagem PyQtGraph."""
+    """Card inferior do traçado cardíaco em estilo monitor hospitalar ECG."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -32,60 +32,67 @@ class PpgChartCard(QFrame):
         self.setStyleSheet(
             """
             #PpgChartCard {
-                background-color: #FFFFFF;
-                border: 1px solid #F1E6E9;
-                border-radius: 16px;
+                background-color: #131D28;
+                border: 1px solid #1F2E3E;
+                border-radius: 12px;
             }
             """
         )
         apply_card_shadow(self)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 14)
-        root.setSpacing(6)
+        root.setContentsMargins(18, 14, 18, 14)
+        root.setSpacing(8)
 
         header = QHBoxLayout()
         header.setSpacing(12)
         self.badge = _PpgBadge(self)
         self.title_label = QLabel("Sinal PPG", self)
         self.title_label.setStyleSheet(
-            "color: #6E5960; font-size: 14.5px; font-weight: 500; background: transparent; border: none;"
+            "color: #E6EDF3; font-size: 14.5px; font-weight: 600; background: transparent; border: none;"
+        )
+        lead_lbl = QLabel("DERIVAÇÃO II  •  25 mm/s  •  200 Hz", self)
+        lead_lbl.setStyleSheet(
+            "color: #00E676; font-size: 11px; font-weight: 700; letter-spacing: 0.6px; "
+            "background: #0D2019; border: 1px solid #184330; border-radius: 6px; padding: 3px 8px;"
         )
         self.status_pill = StatusPill(self)
 
         header.addWidget(self.badge)
         header.addWidget(self.title_label)
+        header.addWidget(lead_lbl)
         header.addStretch(1)
         header.addWidget(self.status_pill)
         root.addLayout(header)
 
-        # Configuração PyQtGraph
+        # Osciloscópio clínico PyQtGraph
         pg.setConfigOptions(antialias=True)
         self.plot_widget = pg.PlotWidget(self)
-        self.plot_widget.setBackground("#FFFFFF")
+        self.plot_widget.setBackground("#091017")
+        self.plot_widget.setStyleSheet("border: 1px solid #1A2A3A; border-radius: 8px;")
         self.plot_widget.setMenuEnabled(False)
         self.plot_widget.setMouseEnabled(x=False, y=False)
         self.plot_widget.hideButtons()
 
         plot_item = self.plot_widget.getPlotItem()
-        plot_item.setContentsMargins(10, 6, 16, 4)
+        plot_item.setContentsMargins(8, 8, 14, 6)
         plot_item.setYRange(-1.05, 1.05, padding=0.0)
-        plot_item.setXRange(-0.12, 4.12, padding=0.0)
+        plot_item.setXRange(-0.10, 4.10, padding=0.0)
 
-        tick_font = QFont("Sans Serif", 9)
-        tick_color = QColor("#9C8B91")
+        tick_font = QFont("Monospace", 8)
+        tick_color = QColor("#678099")
 
         left_axis = plot_item.getAxis("left")
-        left_axis.setPen(pg.mkPen(None))
+        left_axis.setPen(pg.mkPen(color="#1C2E40", width=1))
         left_axis.setTextPen(tick_color)
         left_axis.setTickFont(tick_font)
-        left_axis.setStyle(tickLength=0, tickTextOffset=8)
+        left_axis.setStyle(tickLength=4, tickTextOffset=8)
         left_axis.setTicks(
             [[(-1.0, "-1.0"), (-0.5, "-0.5"), (0.0, "0.0"), (0.5, "0.5"), (1.0, "1.0")]]
         )
 
         bottom_axis = plot_item.getAxis("bottom")
-        bottom_axis.setPen(pg.mkPen(color="#EDE3E6", width=1))
+        bottom_axis.setPen(pg.mkPen(color="#1C2E40", width=1))
         bottom_axis.setTextPen(tick_color)
         bottom_axis.setTickFont(tick_font)
         bottom_axis.setStyle(tickLength=5, tickTextOffset=8)
@@ -93,24 +100,26 @@ class PpgChartCard(QFrame):
             [[(0.0, "0.0s"), (1.0, "1.0s"), (2.0, "2.0s"), (3.0, "3.0s"), (4.0, "4.0s")]]
         )
 
-        # Linhas horizontais sutis de grade
-        for y_val in (-1.0, -0.5, 0.0, 0.5, 1.0):
-            line = pg.InfiniteLine(
-                pos=y_val,
-                angle=0,
-                pen=pg.mkPen(color="#F4ECEE", width=1, style=Qt.PenStyle.DotLine),
-            )
-            plot_item.addItem(line)
+        # Grade milimetrada estilo papel/osciloscópio de ECG
+        for x_minor in np.arange(0.0, 4.01, 0.2):
+            is_major = abs(x_minor - round(x_minor)) < 1e-6
+            col = "#182A3B" if is_major else "#101C27"
+            plot_item.addItem(pg.InfiniteLine(pos=float(x_minor), angle=90, pen=pg.mkPen(color=col, width=1)))
 
-        # Gradiente rosa sob a onda PPG
-        grad = QLinearGradient(0.0, 0.55, 0.0, -0.85)
-        grad.setColorAt(0.0, QColor(227, 134, 158, 95))
-        grad.setColorAt(0.65, QColor(235, 165, 184, 35))
-        grad.setColorAt(1.0, QColor(245, 210, 220, 0))
+        for y_minor in np.arange(-1.0, 1.01, 0.25):
+            is_major = abs((y_minor * 2.0) - round(y_minor * 2.0)) < 1e-6
+            col = "#182A3B" if is_major else "#101C27"
+            plot_item.addItem(pg.InfiniteLine(pos=float(y_minor), angle=0, pen=pg.mkPen(color=col, width=1)))
+
+        # Brilho suave verde-esmeralda sob o traço ECG
+        grad = QLinearGradient(0.0, 0.85, 0.0, -0.55)
+        grad.setColorAt(0.0, QColor(0, 230, 118, 55))
+        grad.setColorAt(0.65, QColor(0, 230, 118, 18))
+        grad.setColorAt(1.0, QColor(0, 230, 118, 0))
 
         self.curve = plot_item.plot(
-            pen=pg.mkPen(color="#BC647B", width=2.2),
-            fillLevel=-0.85,
+            pen=pg.mkPen(color="#00E676", width=2.4),
+            fillLevel=-0.65,
             brush=QBrush(grad),
         )
 

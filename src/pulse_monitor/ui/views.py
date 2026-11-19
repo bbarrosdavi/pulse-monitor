@@ -1,4 +1,4 @@
-"""Vistas secundárias acessíveis pela barra lateral (Análise DSP, Registros e Configurações)."""
+"""Vistas secundárias clínicas (Análise DSP, Registros e Configurações)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 
-import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -33,11 +32,43 @@ from pulse_monitor.ui.cards import apply_card_shadow
 def _card_style() -> str:
     return """
     QFrame#SectionCard {
-        background-color: #FFFFFF;
-        border: 1px solid #F1E6E9;
-        border-radius: 16px;
+        background-color: #131D28;
+        border: 1px solid #1F2E3E;
+        border-radius: 12px;
     }
     """
+
+
+_BTN_STYLE = """
+QPushButton {
+    background-color: #162B3A;
+    color: #D5E6F5;
+    border: 1px solid #26455D;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background-color: #1E394C;
+    border-color: #29B6F6;
+}
+"""
+
+_COMBO_STYLE = """
+QComboBox {
+    background-color: #0E1620;
+    color: #E6EDF3;
+    border: 1px solid #223547;
+    border-radius: 8px;
+    padding: 6px 10px;
+}
+QComboBox QAbstractItemView {
+    background-color: #131D28;
+    color: #E6EDF3;
+    selection-background-color: #1D3549;
+}
+"""
 
 
 class AnalysisView(QWidget):
@@ -58,17 +89,17 @@ class AnalysisView(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        title = QLabel("Análise de Filtragem Digital (Sinal Bruto vs. Filtrado)", card)
-        title.setStyleSheet("color: #5D3E48; font-size: 15px; font-weight: 600; border: none;")
+        title = QLabel("Análise de Filtragem Digital (PPG Bruto vs. Filtrado)", card)
+        title.setStyleSheet("color: #E6EDF3; font-size: 15px; font-weight: 600; border: none;")
         self.metrics_label = QLabel("Razão R: -- | IP: --% | Amostras: 0", card)
-        self.metrics_label.setStyleSheet("color: #8A747C; font-size: 12.5px; border: none;")
+        self.metrics_label.setStyleSheet("color: #8EA6BC; font-size: 12.5px; border: none;")
         header.addWidget(title)
         header.addStretch(1)
         header.addWidget(self.metrics_label)
         layout.addLayout(header)
 
         self.plot = pg.PlotWidget(card)
-        self.plot.setBackground("#FFFFFF")
+        self.plot.setBackground("#091017")
         self.plot.setMenuEnabled(False)
         self.plot.setMouseEnabled(x=False, y=False)
         self.plot.hideButtons()
@@ -77,17 +108,17 @@ class AnalysisView(QWidget):
         pi.setYRange(-1.05, 1.05, padding=0.0)
         pi.setXRange(0.0, 4.0, padding=0.01)
         pi.addLegend(offset=(12, 8))
-        pi.getAxis("left").setTextPen(QColor("#9C8B91"))
-        pi.getAxis("bottom").setTextPen(QColor("#9C8B91"))
-        pi.showGrid(x=False, y=True, alpha=0.25)
+        pi.getAxis("left").setTextPen(QColor("#6E88A0"))
+        pi.getAxis("bottom").setTextPen(QColor("#6E88A0"))
+        pi.showGrid(x=True, y=True, alpha=0.18)
 
         self.raw_curve = pi.plot(
-            pen=pg.mkPen(color="#C9B7BE", width=1.2),
-            name="Bruto AC (60 Hz + deriva)",
+            pen=pg.mkPen(color="#526B82", width=1.2),
+            name="PPG Bruto AC (60 Hz + deriva)",
         )
         self.filt_curve = pi.plot(
-            pen=pg.mkPen(color="#BC647B", width=2.2),
-            name="Filtrado (Notch 60 Hz + 0.5–4.5 Hz)",
+            pen=pg.mkPen(color="#29B6F6", width=2.2),
+            name="PPG Filtrado (Notch 60 Hz + 0.5–4.5 Hz)",
         )
         layout.addWidget(self.plot, 1)
         root.addWidget(card, 1)
@@ -110,7 +141,7 @@ class TelemetryRecord:
 
 
 class RecordsView(QWidget):
-    """Histórico da sessão e exportação CSV dos sinais vitais."""
+    """Histórico da sessão clínica e exportação CSV dos sinais vitais."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -129,25 +160,12 @@ class RecordsView(QWidget):
         layout.setSpacing(12)
 
         header = QHBoxLayout()
-        title = QLabel("Registros da Sessão", card)
-        title.setStyleSheet("color: #5D3E48; font-size: 15px; font-weight: 600; border: none;")
+        title = QLabel("Prontuário de Leituras da Sessão", card)
+        title.setStyleSheet("color: #E6EDF3; font-size: 15px; font-weight: 600; border: none;")
 
         self.export_btn = QPushButton("Exportar CSV", card)
         self.export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.export_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #F9E9ED;
-                color: #6B4C56;
-                border: 1px solid #EBD4DA;
-                border-radius: 8px;
-                padding: 6px 14px;
-                font-size: 12.5px;
-                font-weight: 500;
-            }
-            QPushButton:hover { background-color: #F4DCE2; }
-            """
-        )
+        self.export_btn.setStyleSheet(_BTN_STYLE)
         self.export_btn.clicked.connect(self._export_csv)
 
         header.addWidget(title)
@@ -156,25 +174,25 @@ class RecordsView(QWidget):
         layout.addLayout(header)
 
         self.table = QTableWidget(0, 5, card)
-        self.table.setHorizontalHeaderLabels(["Horário", "BPM", "SpO₂ (%)", "Razão R", "Origem"])
+        self.table.setHorizontalHeaderLabels(["Horário", "FC (bpm)", "SpO₂ (%)", "Razão R", "Origem"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setStyleSheet(
             """
             QTableWidget {
-                border: 1px solid #F1E6E9;
-                border-radius: 10px;
-                background-color: #FFFFFF;
-                color: #5D3E48;
-                gridline-color: #F6EEF0;
+                border: 1px solid #1E2F3F;
+                border-radius: 8px;
+                background-color: #0B1219;
+                color: #D9E6F2;
+                gridline-color: #172432;
             }
             QHeaderView::section {
-                background-color: #FDF7F8;
-                color: #7D636B;
+                background-color: #121D29;
+                color: #8FA8BF;
                 border: none;
-                border-bottom: 1px solid #F1E6E9;
-                padding: 6px;
-                font-weight: 600;
+                border-bottom: 1px solid #1F3142;
+                padding: 7px;
+                font-weight: 700;
             }
             """
         )
@@ -195,7 +213,9 @@ class RecordsView(QWidget):
         values = [now, f"{bpm:.0f}", f"{spo2:.1f}", f"{r_ratio:.3f}", source]
         for col, text in enumerate(values):
             item = QTableWidgetItem(text)
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter if col < 4 else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter if col < 4 else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
             self.table.setItem(0, col, item)
 
     def _export_csv(self) -> None:
@@ -210,11 +230,11 @@ class RecordsView(QWidget):
 
 
 class SettingsView(QWidget):
-    """Configuração de fonte (Simulador Arduino vs USB Serial), simulação e filtros DSP."""
+    """Configuração de fonte (Arduino USB vs Simulador), simulação e filtros DSP."""
 
-    source_mode_changed = Signal(bool, str)  # use_virtual, serial_port
-    sim_params_changed = Signal(float, float, bool, bool)  # bpm, spo2, noise60, motion
-    dsp_filters_changed = Signal(bool, bool)  # notch_60hz, bandpass
+    source_mode_changed = Signal(bool, str)
+    sim_params_changed = Signal(float, float, bool, bool)
+    dsp_filters_changed = Signal(bool, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -222,7 +242,6 @@ class SettingsView(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
 
-        # Card 1: Fonte de Dados (Arduino Simulado vs Físico)
         hw_card = QFrame(self)
         hw_card.setObjectName("SectionCard")
         hw_card.setStyleSheet(_card_style())
@@ -232,32 +251,22 @@ class SettingsView(QWidget):
         hw_layout.setSpacing(10)
 
         hw_title = QLabel("Hardware e Comunicação Serial (Arduino Pro Micro + MAX30102)", hw_card)
-        hw_title.setStyleSheet("color: #5D3E48; font-size: 14.5px; font-weight: 600; border: none;")
+        hw_title.setStyleSheet("color: #E6EDF3; font-size: 14.5px; font-weight: 600; border: none;")
         hw_layout.addWidget(hw_title)
 
         row_src = QHBoxLayout()
         self.mode_combo = QComboBox(hw_card)
+        self.mode_combo.setStyleSheet(_COMBO_STYLE)
         self.mode_combo.addItem("Simulador Arduino Pro Micro + MAX30102 (Virtual PTY)", "virtual")
         self.mode_combo.addItem("Arduino Pro Micro Físico (USB Serial 115200 bps)", "usb")
 
         self.port_combo = QComboBox(hw_card)
+        self.port_combo.setStyleSheet(_COMBO_STYLE)
         self.refresh_btn = QPushButton("Atualizar Portas", hw_card)
         self.apply_src_btn = QPushButton("Conectar", hw_card)
         for btn in (self.refresh_btn, self.apply_src_btn):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(
-                """
-                QPushButton {
-                    background-color: #F9E9ED;
-                    color: #6B4C56;
-                    border: 1px solid #EBD4DA;
-                    border-radius: 8px;
-                    padding: 5px 12px;
-                    font-weight: 500;
-                }
-                QPushButton:hover { background-color: #F4DCE2; }
-                """
-            )
+            btn.setStyleSheet(_BTN_STYLE)
 
         row_src.addWidget(self.mode_combo, 2)
         row_src.addWidget(self.port_combo, 1)
@@ -265,11 +274,10 @@ class SettingsView(QWidget):
         row_src.addWidget(self.apply_src_btn)
         hw_layout.addLayout(row_src)
 
-        self.port_status = QLabel("Conectado ao Simulador Virtual Arduino + MAX30102", hw_card)
-        self.port_status.setStyleSheet("color: #8A747C; font-size: 12px; border: none;")
+        self.port_status = QLabel("Status: inicializando aquisição...", hw_card)
+        self.port_status.setStyleSheet("color: #8EA6BC; font-size: 12px; border: none;")
         hw_layout.addWidget(self.port_status)
 
-        # Card 2: Parâmetros do Módulo Simulado & Filtros
         sim_card = QFrame(self)
         sim_card.setObjectName("SectionCard")
         sim_card.setStyleSheet(_card_style())
@@ -279,14 +287,13 @@ class SettingsView(QWidget):
         sim_layout.setSpacing(12)
 
         sim_title = QLabel("Parâmetros do Módulo Simulado e Filtros Digitais", sim_card)
-        sim_title.setStyleSheet("color: #5D3E48; font-size: 14.5px; font-weight: 600; border: none;")
+        sim_title.setStyleSheet("color: #E6EDF3; font-size: 14.5px; font-weight: 600; border: none;")
         sim_layout.addWidget(sim_title)
 
-        # Slider BPM
         bpm_row = QHBoxLayout()
         self.bpm_val_lbl = QLabel("Frequência Alvo: 62 bpm", sim_card)
         self.bpm_val_lbl.setMinimumWidth(175)
-        self.bpm_val_lbl.setStyleSheet("color: #6E5960; border: none;")
+        self.bpm_val_lbl.setStyleSheet("color: #A8BDD1; border: none;")
         self.bpm_slider = QSlider(Qt.Orientation.Horizontal, sim_card)
         self.bpm_slider.setRange(40, 160)
         self.bpm_slider.setValue(62)
@@ -294,11 +301,10 @@ class SettingsView(QWidget):
         bpm_row.addWidget(self.bpm_slider, 1)
         sim_layout.addLayout(bpm_row)
 
-        # Slider SpO2
         spo2_row = QHBoxLayout()
         self.spo2_val_lbl = QLabel("SpO₂ Alvo: 98 %", sim_card)
         self.spo2_val_lbl.setMinimumWidth(175)
-        self.spo2_val_lbl.setStyleSheet("color: #6E5960; border: none;")
+        self.spo2_val_lbl.setStyleSheet("color: #A8BDD1; border: none;")
         self.spo2_slider = QSlider(Qt.Orientation.Horizontal, sim_card)
         self.spo2_slider.setRange(80, 100)
         self.spo2_slider.setValue(98)
@@ -306,9 +312,8 @@ class SettingsView(QWidget):
         spo2_row.addWidget(self.spo2_slider, 1)
         sim_layout.addLayout(spo2_row)
 
-        # Checkboxes de ruído e filtros
         checks_row = QHBoxLayout()
-        self.chk_noise60 = QCheckBox("Injetar ruído de rede 60 Hz", sim_card)
+        self.chk_noise60 = QCheckBox("Injetar ruído 60 Hz", sim_card)
         self.chk_noise60.setChecked(True)
         self.chk_motion = QCheckBox("Injetar deriva de movimento", sim_card)
         self.chk_motion.setChecked(True)
@@ -317,7 +322,7 @@ class SettingsView(QWidget):
         self.chk_bandpass = QCheckBox("Filtro Passa-Faixa 0.5–4.5 Hz (IHM)", sim_card)
         self.chk_bandpass.setChecked(True)
         for chk in (self.chk_noise60, self.chk_motion, self.chk_notch, self.chk_bandpass):
-            chk.setStyleSheet("color: #6E5960; border: none;")
+            chk.setStyleSheet("color: #A8BDD1; border: none;")
             checks_row.addWidget(chk)
         sim_layout.addLayout(checks_row)
 
