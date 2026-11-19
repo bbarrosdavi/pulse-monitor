@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
             finger_detected=metrics.finger_detected,
         )
         wave = metrics.ecg_display if metrics.ecg_display is not None else metrics.ppg_filtered
-        self.ppg_card.update_waveform(metrics.time_axis, wave)
+        self.ppg_card.update_waveform(metrics.time_axis, wave, cursor_idx=metrics.sweep_cursor)
         self.analysis_view.update_metrics(metrics)
 
     def closeEvent(self, event) -> None:  # noqa: N802

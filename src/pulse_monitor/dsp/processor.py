@@ -39,6 +39,7 @@ class DspMetrics:
     sample_count: int
     finger_detected: bool = True
     ecg_display: np.ndarray | None = None
+    sweep_cursor: int = 0
 
 
 class PpgSignalProcessor:
@@ -54,6 +55,19 @@ class PpgSignalProcessor:
         self._bpm_ema: float | None = None
         self._spo2_ema: float | None = None
         self._finger_present: bool = False
+
+        # Estado causal amostra-a-amostra para desenho sincronizado em estilo monitor ECG
+        display_len = int(self.config.sample_rate_hz * self.config.display_seconds)
+        self._display_len = display_len
+        self._sweep_buf = np.full(display_len, np.nan, dtype=np.float64)
+        self._sweep_cursor = 0
+        self._dc_ema: float | None = None
+        self._ac_lp = 0.0
+        self._prev_ac_lp = 0.0
+        self._prev_slope = 0.0
+        self._ac_env = 50.0
+        self._samples_since_beat = int(self.config.sample_rate_hz)
+        self._active_beats: list[int] = []
 
         fs = self.config.sample_rate_hz
         self._b_notch, self._a_notch = signal.iirnotch(60.0, Q=30.0, fs=fs)
@@ -72,6 +86,78 @@ class PpgSignalProcessor:
         self._bpm_ema = None
         self._spo2_ema = None
         self._finger_present = False
+        self._sweep_buf.fill(np.nan)
+        self._sweep_cursor = 0
+        self._dc_ema = None
+        self._ac_lp = 0.0
+        self._prev_ac_lp = 0.0
+        self._prev_slope = 0.0
+        self._ac_env = 50.0
+        self._samples_since_beat = int(self.config.sample_rate_hz)
+        self._active_beats.clear()
+
+    def _step_ecg_sweep(self, ir_val: float, finger_ok: bool) -> None:
+        """Avança o cursor de varredura ECG 1 amostra por vez, sincronizado à amostragem."""
+        fs = self.config.sample_rate_hz
+        baseline = -0.22
+
+        if not finger_ok:
+            self._dc_ema = None
+            self._ac_lp = 0.0
+            self._prev_ac_lp = 0.0
+            self._prev_slope = 0.0
+            self._active_beats.clear()
+            y_val = baseline
+        else:
+            if self._dc_ema is None:
+                self._dc_ema = ir_val
+            # Filtro causal passa-faixa leve (~0.3 Hz .. 5 Hz) para disparar cada batimento real
+            self._dc_ema = 0.992 * self._dc_ema + 0.008 * ir_val
+            ac_raw = -(ir_val - self._dc_ema)
+            self._prev_ac_lp = self._ac_lp
+            self._ac_lp = 0.86 * self._ac_lp + 0.14 * ac_raw
+            slope = self._ac_lp - self._prev_ac_lp
+
+            abs_ac = abs(self._ac_lp)
+            self._ac_env = max(15.0, 0.995 * self._ac_env + 0.005 * abs_ac)
+
+            self._samples_since_beat += 1
+            refractory = int(0.34 * fs)
+            # Dispara na passagem pelo topo sistólico (derivada muda de + para -) acima do limiar
+            if (
+                self._samples_since_beat >= refractory
+                and self._prev_slope > 0.0
+                and slope <= 0.0
+                and self._ac_lp > 0.35 * self._ac_env
+            ):
+                self._active_beats.append(0)
+                self._samples_since_beat = 0
+            self._prev_slope = slope
+
+            # Desenha os complexos P-Q-R-S-T ativos ponto a ponto nesta amostra
+            y_val = baseline
+            next_beats: list[int] = []
+            max_age = int(0.56 * fs)
+            for age in self._active_beats:
+                t = age / fs
+                p_wave = 0.13 * np.exp(-0.5 * ((t - 0.060) / 0.022) ** 2)
+                q_wave = -0.14 * np.exp(-0.5 * ((t - 0.145) / 0.009) ** 2)
+                r_wave = 0.95 * np.exp(-0.5 * ((t - 0.180) / 0.011) ** 2)
+                s_wave = -0.28 * np.exp(-0.5 * ((t - 0.215) / 0.010) ** 2)
+                t_wave = 0.24 * np.exp(-0.5 * ((t - 0.365) / 0.042) ** 2)
+                y_val += float(p_wave + q_wave + r_wave + s_wave + t_wave)
+                if age + 1 < max_age:
+                    next_beats.append(age + 1)
+            self._active_beats = next_beats
+            y_val = float(np.clip(y_val, -0.95, 0.95))
+
+        # Escreve na posição atual do cursor de varredura e cria lacuna (erase bar) à frente
+        idx = self._sweep_cursor
+        self._sweep_buf[idx] = y_val
+        gap = 26  # ~0.13s de barra de apagamento estilo monitor de UTI
+        for k in range(1, gap + 1):
+            self._sweep_buf[(idx + k) % self._display_len] = np.nan
+        self._sweep_cursor = (idx + 1) % self._display_len
 
     def push_samples(self, samples: list[PpgSample]) -> None:
         """Adiciona novas amostras recebidas da porta serial."""
@@ -79,16 +165,19 @@ class PpgSignalProcessor:
         for s in samples:
             ir_val = float(s.ir_raw)
             red_val = float(s.red_raw)
-            if not self._finger_present and ir_val >= threshold:
+            finger_ok = ir_val >= threshold
+            if not self._finger_present and finger_ok:
                 # Limpa amostras antigas sem dedo para evitar degrau DC no filtro
                 self._ir_buf.clear()
                 self._red_buf.clear()
                 self._bpm_ema = None
                 self._spo2_ema = None
+                self._dc_ema = ir_val
                 self._finger_present = True
             self._ir_buf.append(ir_val)
             self._red_buf.append(red_val)
             self._total_samples += 1
+            self._step_ecg_sweep(ir_val, finger_ok)
 
     def _apply_filters(self, ac_signal: np.ndarray) -> np.ndarray:
         out = ac_signal
@@ -123,7 +212,8 @@ class PpgSignalProcessor:
                 perfusion_index_pct=0.0,
                 sample_count=self._total_samples,
                 finger_detected=finger_ok,
-                ecg_display=zeros,
+                ecg_display=self._sweep_buf.copy(),
+                sweep_cursor=(self._sweep_cursor - 1) % self._display_len,
             )
 
         ir_raw = np.asarray(self._ir_buf, dtype=np.float64)
@@ -145,7 +235,8 @@ class PpgSignalProcessor:
                 perfusion_index_pct=0.0,
                 sample_count=self._total_samples,
                 finger_detected=False,
-                ecg_display=zeros,
+                ecg_display=self._sweep_buf.copy(),
+                sweep_cursor=(self._sweep_cursor - 1) % self._display_len,
             )
 
         dc_ir = float(np.mean(ir_raw))
@@ -204,7 +295,6 @@ class PpgSignalProcessor:
             self._spo2_ema = spo2_inst if self._spo2_ema is None else (0.20 * spo2_inst + 0.80 * self._spo2_ema)
 
         pi_pct = (float(p_high - p_low) / dc_ir * 100.0) if dc_ir > 1.0 else 0.0
-        ecg_disp = self._synthesize_ecg_from_peaks(ir_filt, display_len, fs, ppg_disp)
 
         return DspMetrics(
             time_axis=time_axis,
@@ -216,53 +306,6 @@ class PpgSignalProcessor:
             perfusion_index_pct=pi_pct,
             sample_count=self._total_samples,
             finger_detected=True,
-            ecg_display=ecg_disp,
+            ecg_display=self._sweep_buf.copy(),
+            sweep_cursor=(self._sweep_cursor - 1) % self._display_len,
         )
-
-    @staticmethod
-    def _synthesize_ecg_from_peaks(
-        ir_filt: np.ndarray,
-        display_len: int,
-        fs: float,
-        ppg_disp: np.ndarray,
-    ) -> np.ndarray:
-        """Gera traçado estilo ECG (complexo P-QRS-T) sincronizado aos picos reais do PPG."""
-        margin = int(0.45 * fs)
-        seg_len = min(len(ir_filt), display_len + margin)
-        seg = ir_filt[-seg_len:]
-        seg_std = float(np.std(seg))
-        if seg_std < 1e-3:
-            return np.full(display_len, -0.20, dtype=np.float64)
-
-        peaks, _ = signal.find_peaks(
-            seg,
-            distance=int(0.28 * fs),
-            prominence=max(0.30 * seg_std, 1e-3),
-        )
-
-        # Deslocamento entre o segmento analisado e a janela de exibição [0..display_len)
-        tail_offset = seg_len - display_len
-        t_grid = np.arange(display_len, dtype=np.float64) / fs
-        ecg = np.full(display_len, -0.20, dtype=np.float64)
-
-        # Modulação sutil da amplitude real de cada batimento
-        median_peak = float(np.median(seg[peaks])) if len(peaks) > 0 else seg_std
-        median_peak = max(abs(median_peak), 1e-3)
-
-        for pk in peaks:
-            t_r = (pk - tail_offset) / fs
-            if t_r < -0.35 or t_r > (display_len / fs) + 0.35:
-                continue
-            amp = float(np.clip(seg[pk] / median_peak, 0.80, 1.18))
-            dt = t_grid - t_r
-            # Complexo P-Q-R-S-T clássico
-            p_wave = 0.13 * np.exp(-0.5 * ((dt + 0.165) / 0.026) ** 2)
-            q_wave = -0.14 * np.exp(-0.5 * ((dt + 0.040) / 0.010) ** 2)
-            r_wave = 0.90 * np.exp(-0.5 * (dt / 0.012) ** 2)
-            s_wave = -0.26 * np.exp(-0.5 * ((dt - 0.036) / 0.011) ** 2)
-            t_wave = 0.23 * np.exp(-0.5 * ((dt - 0.215) / 0.044) ** 2)
-            ecg += amp * (p_wave + q_wave + r_wave + s_wave + t_wave)
-
-        # Pequena variação orgânica vinda do sinal PPG filtrado real
-        ecg += 0.03 * ppg_disp
-        return np.clip(ecg, -0.95, 0.95)

@@ -111,19 +111,31 @@ class PpgChartCard(QFrame):
             col = "#182A3B" if is_major else "#101C27"
             plot_item.addItem(pg.InfiniteLine(pos=float(y_minor), angle=0, pen=pg.mkPen(color=col, width=1)))
 
-        # Brilho suave verde-esmeralda sob o traço ECG
-        grad = QLinearGradient(0.0, 0.85, 0.0, -0.55)
-        grad.setColorAt(0.0, QColor(0, 230, 118, 55))
-        grad.setColorAt(0.65, QColor(0, 230, 118, 18))
-        grad.setColorAt(1.0, QColor(0, 230, 118, 0))
-
+        # Traço principal estilo osciloscópio ECG hospitalar (varredura contínua com lacuna)
         self.curve = plot_item.plot(
             pen=pg.mkPen(color="#00E676", width=2.4),
-            fillLevel=-0.65,
-            brush=QBrush(grad),
+            connect="finite",
         )
+        # Ponto luminoso na ponta do feixe de varredura
+        self.cursor_dot = pg.ScatterPlotItem(
+            size=9,
+            brush=pg.mkBrush("#B9F6CA"),
+            pen=pg.mkPen("#00E676", width=2),
+        )
+        plot_item.addItem(self.cursor_dot)
 
         root.addWidget(self.plot_widget, 1)
 
-    def update_waveform(self, time_axis: np.ndarray, ppg_values: np.ndarray) -> None:
-        self.curve.setData(time_axis, ppg_values)
+    def update_waveform(
+        self,
+        time_axis: np.ndarray,
+        ppg_values: np.ndarray,
+        cursor_idx: int | None = None,
+    ) -> None:
+        self.curve.setData(time_axis, ppg_values, connect="finite")
+        if cursor_idx is not None and 0 <= cursor_idx < len(time_axis):
+            val = ppg_values[cursor_idx]
+            if np.isfinite(val):
+                self.cursor_dot.setData([time_axis[cursor_idx]], [val])
+                return
+        self.cursor_dot.setData([], [])
